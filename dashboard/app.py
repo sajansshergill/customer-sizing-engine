@@ -14,13 +14,18 @@ import streamlit as st
 from pathlib import Path
 from typing import Optional
 
+_DASHBOARD_DIR = Path(__file__).resolve().parent
+_APP_ICON = _DASHBOARD_DIR / "assets" / "app_icon.png"
+_PAGE_ICON = str(_APP_ICON) if _APP_ICON.is_file() else "📊"
+
 # ── Page config ───────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="Adobe Propensity & Headroom Engine",
-    page_icon="📊",
+    page_title="Revenue Sizing Engine",
+    page_icon=_PAGE_ICON,
     layout="wide",
     initial_sidebar_state="expanded",
+    menu_items={"Get help": None, "Report a bug": None, "About": None},
 )
 
 # ── Theme constants ───────────────────────────────────────────────────────────
@@ -45,30 +50,48 @@ TIER_COLORS = {
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
+    html, body, [class*="css"] { font-family: "DM Sans", "Segoe UI", system-ui, sans-serif; }
+    .block-container { padding-top: 1.25rem; padding-bottom: 2rem; max-width: 1400px; }
+    [data-testid="stHeader"] { background: transparent; }
+    [data-testid="stToolbar"] { background: transparent; }
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #FAFAF9 0%, #F4F4F2 100%);
+        border-right: 1px solid #E5E5E4 !important;
+    }
+    [data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
+    .hero-title {
+        font-size: 1.65rem; font-weight: 700; letter-spacing: -0.02em;
+        color: #111827; margin: 0 0 0.35rem 0; line-height: 1.2;
+    }
+    .hero-sub {
+        font-size: 0.9rem; color: #6B7280; font-weight: 400; margin: 0 0 1rem 0;
+    }
+    .hero-divider { height: 1px; background: linear-gradient(90deg, #E5E7EB 0%, transparent 100%); margin: 0 0 1.25rem 0; }
     .metric-card {
-        background: #F8F8F6;
-        border-radius: 10px;
-        padding: 1rem 1.25rem;
-        border: 0.5px solid #D3D1C7;
+        background: #FFFFFF;
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        border: 1px solid #E5E7EB;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
     }
-    .metric-label { font-size: 12px; color: #5F5E5A; margin-bottom: 4px; }
-    .metric-value { font-size: 28px; font-weight: 700; line-height: 1; }
-    .metric-sub   { font-size: 11px; color: #888780; margin-top: 4px; }
+    .metric-label { font-size: 11px; font-weight: 500; color: #6B7280; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+    .metric-value { font-size: 1.5rem; font-weight: 700; line-height: 1.15; color: #111827; }
+    .metric-sub   { font-size: 11px; color: #9CA3AF; margin-top: 6px; }
     .section-title {
-        font-size: 15px; font-weight: 600;
-        color: #2C2C2A; margin: 1.5rem 0 0.75rem;
-        border-left: 3px solid #378ADD;
-        padding-left: 10px;
+        font-size: 0.8125rem; font-weight: 600;
+        color: #374151; margin: 1.75rem 0 1rem 0;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        border-bottom: 1px solid #E5E7EB;
+        padding-bottom: 0.5rem;
     }
-    .tag {
-        display: inline-block;
-        font-size: 10px; padding: 2px 8px;
-        border-radius: 20px; margin: 1px;
-        background: #E6F1FB; color: #185FA5;
-        border: 0.5px solid #B5D4F4;
-    }
+    .sidebar-heading { font-size: 0.75rem; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; }
+    .sidebar-footer { font-size: 11px; color: #9CA3AF; line-height: 1.5; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #E5E7EB; }
+    .sidebar-footer a { color: #1473E6; text-decoration: none; }
+    .sidebar-footer a:hover { text-decoration: underline; }
     div[data-testid="stSidebarNav"] { display: none; }
+    [data-baseweb="tab-list"] { gap: 0.25rem; border-bottom: 1px solid #E5E7EB !important; padding-bottom: 0; }
+    button[data-baseweb="tab"] { font-weight: 500; font-size: 0.875rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -103,6 +126,48 @@ def _sanitize_scatter_for_plotly(
     return d
 
 
+def _json_safe_scatter_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Force plain Python floats and strings so Plotly → Streamlit JSON stays valid."""
+    out = df.copy()
+    for c in ("propensity_score", "rsam_score"):
+        if c in out.columns:
+            s = pd.to_numeric(out[c], errors="coerce")
+            out[c] = [float(v) if pd.notna(v) and np.isfinite(v) else np.nan for v in s]
+    out = out.dropna(subset=["propensity_score", "rsam_score"])
+    for c in ("arr", "composite_score"):
+        if c in out.columns:
+            out[c] = [
+                float(v) if pd.notna(v) and np.isfinite(v) else 0.0
+                for v in pd.to_numeric(out[c], errors="coerce")
+            ]
+    if "account_id" in out.columns:
+        out["account_id"] = out["account_id"].astype(str)
+    if "action_tags" in out.columns:
+        out["action_tags"] = (
+            out["action_tags"].fillna("").astype(str).str.replace("\n", " ", regex=False)
+        )
+    return out
+
+
+def _json_safe_clv_churn_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Churn vs CLV scatter: strict floats for Streamlit JSON."""
+    out = df.copy()
+    for c in ("churn_prob_6m", "risk_adj_clv"):
+        if c in out.columns:
+            s = pd.to_numeric(out[c], errors="coerce")
+            out[c] = [float(v) if pd.notna(v) and np.isfinite(v) else np.nan for v in s]
+    out = out.dropna(subset=["churn_prob_6m", "risk_adj_clv"])
+    for c in ("propensity_score", "rsam_score"):
+        if c in out.columns:
+            out[c] = [
+                float(v) if pd.notna(v) and np.isfinite(v) else 0.0
+                for v in pd.to_numeric(out[c], errors="coerce")
+            ]
+    if "account_id" in out.columns:
+        out["account_id"] = out["account_id"].astype(str)
+    return out
+
+
 def _sanitize_dashboard_df(df: pd.DataFrame) -> pd.DataFrame:
     """Replace inf, coerce numerics — avoids Plotly/Streamlit JSON edge cases."""
     out = df.copy()
@@ -131,16 +196,36 @@ def _safe_pct(x: float) -> str:
     return f"{float(x):.1%}"
 
 
-def st_plotly_safe(fig_in) -> None:
+def _apply_chart_theme(fig) -> None:
+    """Consistent typography and colors. Avoid nested `title=dict(...)` — it can break Streamlit JSON."""
+    fig.update_layout(
+        font=dict(family="Arial, sans-serif", size=11, color="#374151"),
+        title_font=dict(size=13, color="#111827"),
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#FAFAF9",
+        margin=dict(l=12, r=12, t=48, b=12),
+        hoverlabel=dict(font=dict(size=11)),
+    )
+
+
+def _figure_to_json_safe(fig):
+    """Round-trip Plotly figure so traces use JSON-safe numeric types."""
+    return pio.from_json(pio.to_json(fig, validate=False))
+
+
+def st_plotly_safe(fig_in, *, theme: bool = True, json_roundtrip: bool = True) -> None:
     """
-    Round-trip through Plotly JSON so only JSON-safe scalars reach Streamlit's frontend
-    (fixes Safari/React 'Invalid digits after decimal point' on some numpy/NaN paths).
+    theme: apply shared layout (disable for figures already fully styled).
+    json_roundtrip: encode/decode to strip numpy/NaN edge cases (disable if it causes issues).
     """
     fig_out = fig_in
-    try:
-        fig_out = pio.from_json(pio.to_json(fig_in, validate=False))
-    except Exception:
-        pass
+    if theme:
+        _apply_chart_theme(fig_out)
+    if json_roundtrip:
+        try:
+            fig_out = _figure_to_json_safe(fig_out)
+        except Exception:
+            pass
     st.plotly_chart(fig_out, use_container_width=True)
 
 
@@ -193,9 +278,21 @@ def check_data_ready() -> bool:
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 def render_sidebar(df: pd.DataFrame) -> pd.DataFrame:
-    st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/8d/Adobe_Corporate_Logo.png/320px-Adobe_Corporate_Logo.png",
-                     width=120)
-    st.sidebar.markdown("### Filters")
+    st.sidebar.markdown(
+        '<p class="sidebar-heading">Portfolio</p>',
+        unsafe_allow_html=True,
+    )
+    if _APP_ICON.is_file():
+        st.sidebar.image(str(_APP_ICON), width=100)
+    else:
+        st.sidebar.image(
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8d/Adobe_Corporate_Logo.png/320px-Adobe_Corporate_Logo.png",
+            width=100,
+        )
+    st.sidebar.markdown(
+        '<p class="sidebar-heading">Filters</p>',
+        unsafe_allow_html=True,
+    )
 
     segments = st.sidebar.multiselect(
         "Customer segment",
@@ -217,17 +314,20 @@ def render_sidebar(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**Pipeline**")
-    if st.sidebar.button("🔄 Refresh data"):
+    st.sidebar.markdown(
+        '<p class="sidebar-heading">Data</p>',
+        unsafe_allow_html=True,
+    )
+    if st.sidebar.button("Refresh data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
     st.sidebar.markdown("""
-    <small>
-    Built by <b>Sajan Singh Shergill</b><br>
+    <div class="sidebar-footer">
+    <b>Sajan Singh Shergill</b><br>
     MS Data Science · Pace University<br>
-    <a href="https://linkedin.com/in/sajanshergill">linkedin.com/in/sajanshergill</a>
-    </small>
+    <a href="https://linkedin.com/in/sajanshergill" target="_blank" rel="noopener">LinkedIn</a>
+    </div>
     """, unsafe_allow_html=True)
 
     filtered = df[
@@ -340,23 +440,23 @@ def render_overview(df: pd.DataFrame) -> None:
         raw_sample,
         x="propensity_score",
         y="rsam_score",
-        size_col="risk_adj_clv",
+        size_col=None,
         string_cols=("action_tags",),
     )
-    for col in ("arr", "composite_score"):
-        if col in sample.columns:
-            sample[col] = pd.to_numeric(sample[col], errors="coerce")
     if sample.empty:
         st.warning("No rows with valid propensity and rSAM scores to plot.")
         return
+    plot_df = _json_safe_scatter_frame(sample)
+    if plot_df.empty:
+        st.warning("No rows with valid propensity and rSAM scores to plot.")
+        return
+    # Uniform markers avoid size-array NaNs that break Streamlit's Plotly JSON bridge.
     fig3 = px.scatter(
-        sample,
+        plot_df,
         x="propensity_score",
         y="rsam_score",
         color="segment_name",
         color_discrete_map=SEGMENT_COLORS,
-        size="risk_adj_clv",
-        size_max=18,
         hover_data=["account_id", "arr", "composite_score", "action_tags"],
         opacity=0.65,
         labels={
@@ -365,8 +465,9 @@ def render_overview(df: pd.DataFrame) -> None:
             "segment_name": "Segment",
         },
     )
-    y_med = float(sample["rsam_score"].median()) if len(sample) else 0.0
-    y_hi = float(sample["rsam_score"].quantile(0.92)) if len(sample) else 0.0
+    fig3.update_traces(marker=dict(size=8, line=dict(width=0)))
+    y_med = float(np.median(plot_df["rsam_score"])) if len(plot_df) else 0.0
+    y_hi = float(np.quantile(plot_df["rsam_score"], 0.92)) if len(plot_df) else 0.0
     fig3.add_vline(x=0.55, line_dash="dot", line_color="#888780", line_width=1)
     fig3.add_hline(y=y_med, line_dash="dot",
                    line_color="#888780", line_width=1)
@@ -377,13 +478,15 @@ def render_overview(df: pd.DataFrame) -> None:
                         text="High Headroom / Low Intent", showarrow=False,
                         font=dict(size=10, color="#BA7517"))
     fig3.update_layout(
-        plot_bgcolor="#F8F8F6", paper_bgcolor="#F8F8F6",
-        height=420, margin=dict(l=10, r=10, t=20, b=10),
-        yaxis=dict(tickformat="$,.0f"),
+        plot_bgcolor="#FAFAF9",
+        paper_bgcolor="#FFFFFF",
+        height=420,
+        margin=dict(l=10, r=10, t=20, b=10),
+        yaxis=dict(tickprefix="$", tickformat=",.0f"),
         legend=dict(orientation="h", yanchor="bottom", y=1.01,
                     xanchor="left", x=0),
     )
-    st_plotly_safe(fig3)
+    st_plotly_safe(fig3, theme=False, json_roundtrip=True)
 
 
 # ── Tab 2 — Account List ──────────────────────────────────────────────────────
@@ -394,7 +497,7 @@ def render_account_list(df: pd.DataFrame) -> None:
 
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        search = st.text_input("🔍 Search account ID", placeholder="ACC-00001")
+        search = st.text_input("Search account ID", placeholder="ACC-00001")
     with col2:
         top_n = st.selectbox("Show top", [50, 100, 250, 500, 1000], index=0)
     with col3:
@@ -436,10 +539,11 @@ def render_account_list(df: pd.DataFrame) -> None:
     # download
     csv = display[list(show_cols.keys())].to_csv(index=False)
     st.download_button(
-        "⬇️ Download filtered list",
+        "Download CSV",
         data=csv,
         file_name="prioritized_accounts_filtered.csv",
         mime="text/csv",
+        use_container_width=False,
     )
 
 
@@ -555,7 +659,7 @@ def render_survival(df: pd.DataFrame) -> None:
             showlegend=False,
             plot_bgcolor="#F8F8F6", paper_bgcolor="#F8F8F6",
             height=320, margin=dict(l=10, r=50, t=40, b=10),
-            xaxis=dict(tickformat="$,.0f"),
+            xaxis=dict(tickprefix="$", tickformat=",.0f"),
         )
         st_plotly_safe(fig)
 
@@ -594,31 +698,31 @@ def render_survival(df: pd.DataFrame) -> None:
         raw_s2,
         x="churn_prob_6m",
         y="risk_adj_clv",
-        size_col="arr",
+        size_col=None,
     )
-    for col in ("propensity_score", "rsam_score"):
-        if col in sample.columns:
-            sample[col] = pd.to_numeric(sample[col], errors="coerce")
     if sample.empty:
         st.warning("No rows with valid churn and CLV values to plot.")
         return
+    plot_df = _json_safe_clv_churn_frame(sample)
+    if plot_df.empty:
+        st.warning("No rows with valid churn and CLV values to plot.")
+        return
     fig3 = px.scatter(
-        sample,
+        plot_df,
         x="churn_prob_6m",
         y="risk_adj_clv",
         color="segment_name",
         color_discrete_map=SEGMENT_COLORS,
-        size="arr",
-        size_max=16,
-        opacity=0.6,
         hover_data=["account_id", "propensity_score", "rsam_score"],
+        opacity=0.6,
         labels={
             "churn_prob_6m": "Churn Probability (6M)",
             "risk_adj_clv":  "Risk-Adjusted CLV ($)",
             "segment_name":  "Segment",
         },
     )
-    y92 = float(sample["risk_adj_clv"].quantile(0.92)) if len(sample) else 0.0
+    fig3.update_traces(marker=dict(size=8, line=dict(width=0)))
+    y92 = float(np.quantile(plot_df["risk_adj_clv"], 0.92)) if len(plot_df) else 0.0
     fig3.add_vline(x=0.40, line_dash="dot", line_color="#888780", line_width=1)
     fig3.add_annotation(x=0.05, y=y92,
                         text="Protect & Grow", showarrow=False,
@@ -627,14 +731,16 @@ def render_survival(df: pd.DataFrame) -> None:
                         text="Save Now", showarrow=False,
                         font=dict(size=10, color="#E24B4A"))
     fig3.update_layout(
-        plot_bgcolor="#F8F8F6", paper_bgcolor="#F8F8F6",
-        height=420, margin=dict(l=10, r=10, t=20, b=10),
+        plot_bgcolor="#FAFAF9",
+        paper_bgcolor="#FFFFFF",
+        height=420,
+        margin=dict(l=10, r=10, t=20, b=10),
         xaxis=dict(tickformat=".0%"),
-        yaxis=dict(tickformat="$,.0f"),
+        yaxis=dict(tickprefix="$", tickformat=",.0f"),
         legend=dict(orientation="h", yanchor="bottom", y=1.01,
                     xanchor="left", x=0),
     )
-    st_plotly_safe(fig3)
+    st_plotly_safe(fig3, theme=False, json_roundtrip=True)
 
 
 # ── Tab 5 — Model Health ──────────────────────────────────────────────────────
@@ -712,8 +818,14 @@ def render_model_health(df: pd.DataFrame) -> None:
 # ── Main app ──────────────────────────────────────────────────────────────────
 
 def main():
-    st.title("📊 Adobe Propensity & Headroom Sizing Engine")
-    st.caption("Customer upsell scoring · rSAM headroom · CLV · Campaign prioritization")
+    st.markdown(
+        """
+        <p class="hero-title">Revenue Sizing Engine</p>
+        <p class="hero-sub">Upsell propensity, rSAM headroom, lifetime value, and account prioritization</p>
+        <div class="hero-divider"></div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if not check_data_ready():
         st.error("Pipeline outputs not found. Run `make pipeline` first.")
@@ -731,11 +843,11 @@ def main():
     render_kpis(filtered)
 
     tabs = st.tabs([
-        "📈 Overview",
-        "🎯 Account List",
-        "🔍 Segment Deep Dive",
-        "⏳ Survival & CLV",
-        "🩺 Model Health",
+        "Overview",
+        "Account list",
+        "Segment analysis",
+        "Survival & CLV",
+        "Model health",
     ])
 
     with tabs[0]: render_overview(filtered)
