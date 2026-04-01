@@ -1,0 +1,6 @@
+segment_name,account_count,total_rsam_opportunity,median_rsam_score,avg_propensity,avg_raw_headroom,avg_health_weight,total_expected_rev_90d,strategic_accounts,high_accounts,opportunity_share
+Loyal Mid-Market,3786,201575030.53,46803.06,0.4,133252.88,0.99,50393757.26,10,1533,0.6839
+Growth-Stage Expanding,1214,35514201.4,21124.38,0.44,68993.5,0.93,8878550.35,3,214,0.1205
+High-Value Engaged,255,22588782.15,47955.81,0.42,227321.88,0.87,5647195.55,70,51,0.0766
+At-Risk Dormant,1572,22552163.34,11175.46,0.43,31025.79,0.93,5638040.5,0,2,0.0765
+Early-Stage Potential,3173,12513359.67,2799.11,0.39,12031.12,0.86,3128339.96,0,0,0.0425
