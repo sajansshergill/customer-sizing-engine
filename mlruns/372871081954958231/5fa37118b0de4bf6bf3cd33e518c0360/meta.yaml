@@ -1,0 +1,15 @@
+artifact_uri: file:///Users/sajanshergill/customer-sizing-engine/mlruns/372871081954958231/5fa37118b0de4bf6bf3cd33e518c0360/artifacts
+end_time: 1775041856125
+entry_point_name: ''
+experiment_id: '372871081954958231'
+lifecycle_stage: active
+run_id: 5fa37118b0de4bf6bf3cd33e518c0360
+run_name: xgb-calibrated-v1
+run_uuid: 5fa37118b0de4bf6bf3cd33e518c0360
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775041851794
+status: 3
+tags: []
+user_id: sajanshergill
