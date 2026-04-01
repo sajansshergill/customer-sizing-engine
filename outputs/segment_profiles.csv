@@ -1,0 +1,6 @@
+segment_name,account_count,median_arr,median_headroom,avg_utilization,avg_health_score,avg_tenure_months,avg_nps,avg_feature_adopt,upsell_rate,churn_rate
+High-Value Engaged,255,228308.28,271338.63,0.518,46.757,38.153,4.749,0.551,0.443,0.161
+Growth-Stage Expanding,1214,88279.595,408851.875,0.198,53.606,35.513,5.096,0.547,0.483,0.175
+At-Risk Dormant,1572,9826.38,34941.625,0.185,53.984,36.263,4.975,0.55,0.468,0.142
+Loyal Mid-Market,3786,8381.63,34646.195,0.179,61.804,36.685,7.534,0.551,0.392,0.0
+Early-Stage Potential,3173,7994.17,34601.8,0.18,45.23,36.706,2.017,0.548,0.358,0.344
