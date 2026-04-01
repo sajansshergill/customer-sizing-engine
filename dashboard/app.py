@@ -7,14 +7,13 @@ Run: streamlit run dashboard/app.py
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-import plotly.io as pio
-from plotly.subplots import make_subplots
 import streamlit as st
 from pathlib import Path
 from typing import Optional
 
 _DASHBOARD_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_DATA_DIR = _REPO_ROOT / "data"
 _APP_ICON = _DASHBOARD_DIR / "assets" / "app_icon.png"
 _PAGE_ICON = str(_APP_ICON) if _APP_ICON.is_file() else "📊"
 
@@ -126,45 +125,29 @@ def _sanitize_scatter_for_plotly(
     return d
 
 
-def _json_safe_scatter_frame(df: pd.DataFrame) -> pd.DataFrame:
-    """Force plain Python floats and strings so Plotly → Streamlit JSON stays valid."""
-    out = df.copy()
-    for c in ("propensity_score", "rsam_score"):
-        if c in out.columns:
-            s = pd.to_numeric(out[c], errors="coerce")
-            out[c] = [float(v) if pd.notna(v) and np.isfinite(v) else np.nan for v in s]
+def _vega_scatter_headroom(df: pd.DataFrame) -> pd.DataFrame:
+    """Build a clean frame for st.scatter_chart (Vega-Lite). Avoids Plotly entirely."""
+    cols = ["propensity_score", "rsam_score", "segment_name"]
+    if not all(c in df.columns for c in cols):
+        return pd.DataFrame()
+    out = df[cols].copy()
+    out["propensity_score"] = pd.to_numeric(out["propensity_score"], errors="coerce")
+    out["rsam_score"] = pd.to_numeric(out["rsam_score"], errors="coerce")
     out = out.dropna(subset=["propensity_score", "rsam_score"])
-    for c in ("arr", "composite_score"):
-        if c in out.columns:
-            out[c] = [
-                float(v) if pd.notna(v) and np.isfinite(v) else 0.0
-                for v in pd.to_numeric(out[c], errors="coerce")
-            ]
-    if "account_id" in out.columns:
-        out["account_id"] = out["account_id"].astype(str)
-    if "action_tags" in out.columns:
-        out["action_tags"] = (
-            out["action_tags"].fillna("").astype(str).str.replace("\n", " ", regex=False)
-        )
+    out["segment_name"] = out["segment_name"].fillna("Unknown").astype(str)
     return out
 
 
-def _json_safe_clv_churn_frame(df: pd.DataFrame) -> pd.DataFrame:
-    """Churn vs CLV scatter: strict floats for Streamlit JSON."""
-    out = df.copy()
-    for c in ("churn_prob_6m", "risk_adj_clv"):
-        if c in out.columns:
-            s = pd.to_numeric(out[c], errors="coerce")
-            out[c] = [float(v) if pd.notna(v) and np.isfinite(v) else np.nan for v in s]
+def _vega_scatter_clv_churn(df: pd.DataFrame) -> pd.DataFrame:
+    """Churn vs CLV for st.scatter_chart (Vega-Lite)."""
+    cols = ["churn_prob_6m", "risk_adj_clv", "segment_name"]
+    if not all(c in df.columns for c in cols):
+        return pd.DataFrame()
+    out = df[cols].copy()
+    out["churn_prob_6m"] = pd.to_numeric(out["churn_prob_6m"], errors="coerce")
+    out["risk_adj_clv"] = pd.to_numeric(out["risk_adj_clv"], errors="coerce")
     out = out.dropna(subset=["churn_prob_6m", "risk_adj_clv"])
-    for c in ("propensity_score", "rsam_score"):
-        if c in out.columns:
-            out[c] = [
-                float(v) if pd.notna(v) and np.isfinite(v) else 0.0
-                for v in pd.to_numeric(out[c], errors="coerce")
-            ]
-    if "account_id" in out.columns:
-        out["account_id"] = out["account_id"].astype(str)
+    out["segment_name"] = out["segment_name"].fillna("Unknown").astype(str)
     return out
 
 
@@ -208,24 +191,11 @@ def _apply_chart_theme(fig) -> None:
     )
 
 
-def _figure_to_json_safe(fig):
-    """Round-trip Plotly figure so traces use JSON-safe numeric types."""
-    return pio.from_json(pio.to_json(fig, validate=False))
-
-
-def st_plotly_safe(fig_in, *, theme: bool = True, json_roundtrip: bool = True) -> None:
-    """
-    theme: apply shared layout (disable for figures already fully styled).
-    json_roundtrip: encode/decode to strip numpy/NaN edge cases (disable if it causes issues).
-    """
+def st_plotly_safe(fig_in, *, theme: bool = True) -> None:
+    """Plotly charts only; scatter plots use st.scatter_chart to avoid Safari/JSON issues."""
     fig_out = fig_in
     if theme:
         _apply_chart_theme(fig_out)
-    if json_roundtrip:
-        try:
-            fig_out = _figure_to_json_safe(fig_out)
-        except Exception:
-            pass
     st.plotly_chart(fig_out, use_container_width=True)
 
 
@@ -233,7 +203,7 @@ def st_plotly_safe(fig_in, *, theme: bool = True, json_roundtrip: bool = True) -
 
 @st.cache_data
 def load_data():
-    base = Path("data")
+    base = _DATA_DIR
     accounts  = pd.read_parquet(base / "prioritized_accounts.parquet")
     headroom  = pd.read_parquet(base / "headroom.parquet")
     survival  = pd.read_parquet(base / "survival.parquet")
@@ -266,13 +236,13 @@ def load_data():
 
 def check_data_ready() -> bool:
     required = [
-        "data/prioritized_accounts.parquet",
-        "data/headroom.parquet",
-        "data/survival.parquet",
-        "data/features.parquet",
-        "data/segments.parquet",
+        _DATA_DIR / "prioritized_accounts.parquet",
+        _DATA_DIR / "headroom.parquet",
+        _DATA_DIR / "survival.parquet",
+        _DATA_DIR / "features.parquet",
+        _DATA_DIR / "segments.parquet",
     ]
-    return all(Path(p).exists() for p in required)
+    return all(p.is_file() for p in required)
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -431,7 +401,8 @@ def render_overview(df: pd.DataFrame) -> None:
         )
         st_plotly_safe(fig2)
 
-    # Propensity vs headroom scatter
+    # Propensity vs headroom — st.scatter_chart (Vega-Lite), not Plotly, to avoid
+    # Safari/React JSON parse errors on the Plotly bridge.
     st.markdown('<div class="section-title">Propensity vs Revenue Headroom</div>',
                 unsafe_allow_html=True)
 
@@ -446,47 +417,28 @@ def render_overview(df: pd.DataFrame) -> None:
     if sample.empty:
         st.warning("No rows with valid propensity and rSAM scores to plot.")
         return
-    plot_df = _json_safe_scatter_frame(sample)
-    if plot_df.empty:
+    chart_df = _vega_scatter_headroom(sample)
+    if chart_df.empty:
         st.warning("No rows with valid propensity and rSAM scores to plot.")
         return
-    # Uniform markers avoid size-array NaNs that break Streamlit's Plotly JSON bridge.
-    fig3 = px.scatter(
-        plot_df,
-        x="propensity_score",
-        y="rsam_score",
-        color="segment_name",
-        color_discrete_map=SEGMENT_COLORS,
-        hover_data=["account_id", "arr", "composite_score", "action_tags"],
-        opacity=0.65,
-        labels={
-            "propensity_score": "Propensity Score",
-            "rsam_score": "rSAM Headroom ($)",
+    display = chart_df.rename(
+        columns={
+            "propensity_score": "Propensity score",
+            "rsam_score": "rSAM headroom ($)",
             "segment_name": "Segment",
-        },
+        }
     )
-    fig3.update_traces(marker=dict(size=8, line=dict(width=0)))
-    y_med = float(np.median(plot_df["rsam_score"])) if len(plot_df) else 0.0
-    y_hi = float(np.quantile(plot_df["rsam_score"], 0.92)) if len(plot_df) else 0.0
-    fig3.add_vline(x=0.55, line_dash="dot", line_color="#888780", line_width=1)
-    fig3.add_hline(y=y_med, line_dash="dot",
-                   line_color="#888780", line_width=1)
-    fig3.add_annotation(x=0.78, y=y_hi,
-                        text="Priority Targets", showarrow=False,
-                        font=dict(size=10, color="#1D9E75"))
-    fig3.add_annotation(x=0.15, y=y_hi,
-                        text="High Headroom / Low Intent", showarrow=False,
-                        font=dict(size=10, color="#BA7517"))
-    fig3.update_layout(
-        plot_bgcolor="#FAFAF9",
-        paper_bgcolor="#FFFFFF",
+    st.scatter_chart(
+        display,
+        x="Propensity score",
+        y="rSAM headroom ($)",
+        color="Segment",
         height=420,
-        margin=dict(l=10, r=10, t=20, b=10),
-        yaxis=dict(tickprefix="$", tickformat=",.0f"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.01,
-                    xanchor="left", x=0),
     )
-    st_plotly_safe(fig3, theme=False, json_roundtrip=True)
+    y_med = float(chart_df["rsam_score"].median())
+    st.caption(
+        f"Median rSAM in this sample: **${y_med:,.0f}**. Point color indicates customer segment."
+    )
 
 
 # ── Tab 2 — Account List ──────────────────────────────────────────────────────
@@ -703,44 +655,27 @@ def render_survival(df: pd.DataFrame) -> None:
     if sample.empty:
         st.warning("No rows with valid churn and CLV values to plot.")
         return
-    plot_df = _json_safe_clv_churn_frame(sample)
-    if plot_df.empty:
+    chart_df = _vega_scatter_clv_churn(sample)
+    if chart_df.empty:
         st.warning("No rows with valid churn and CLV values to plot.")
         return
-    fig3 = px.scatter(
-        plot_df,
-        x="churn_prob_6m",
-        y="risk_adj_clv",
-        color="segment_name",
-        color_discrete_map=SEGMENT_COLORS,
-        hover_data=["account_id", "propensity_score", "rsam_score"],
-        opacity=0.6,
-        labels={
-            "churn_prob_6m": "Churn Probability (6M)",
-            "risk_adj_clv":  "Risk-Adjusted CLV ($)",
-            "segment_name":  "Segment",
-        },
+    display = chart_df.rename(
+        columns={
+            "churn_prob_6m": "Churn risk (6 mo)",
+            "risk_adj_clv": "Risk-adjusted CLV ($)",
+            "segment_name": "Segment",
+        }
     )
-    fig3.update_traces(marker=dict(size=8, line=dict(width=0)))
-    y92 = float(np.quantile(plot_df["risk_adj_clv"], 0.92)) if len(plot_df) else 0.0
-    fig3.add_vline(x=0.40, line_dash="dot", line_color="#888780", line_width=1)
-    fig3.add_annotation(x=0.05, y=y92,
-                        text="Protect & Grow", showarrow=False,
-                        font=dict(size=10, color="#1D9E75"))
-    fig3.add_annotation(x=0.55, y=y92,
-                        text="Save Now", showarrow=False,
-                        font=dict(size=10, color="#E24B4A"))
-    fig3.update_layout(
-        plot_bgcolor="#FAFAF9",
-        paper_bgcolor="#FFFFFF",
+    st.scatter_chart(
+        display,
+        x="Churn risk (6 mo)",
+        y="Risk-adjusted CLV ($)",
+        color="Segment",
         height=420,
-        margin=dict(l=10, r=10, t=20, b=10),
-        xaxis=dict(tickformat=".0%"),
-        yaxis=dict(tickprefix="$", tickformat=",.0f"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.01,
-                    xanchor="left", x=0),
     )
-    st_plotly_safe(fig3, theme=False, json_roundtrip=True)
+    st.caption(
+        "Churn probability (6-month horizon) vs risk-adjusted CLV. Point color indicates segment."
+    )
 
 
 # ── Tab 5 — Model Health ──────────────────────────────────────────────────────
